@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Coin Rush — test client</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; padding: 16px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+    input, button { padding: 6px 10px; border-radius: 6px; border: 1px solid #334155; background: #1e293b; color: inherit; }
+    button { cursor: pointer; }
+    canvas { background: #1e293b; border-radius: 8px; max-width: 100%; display: block; }
+    #log { font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; max-height: 160px; overflow: auto; color: #94a3b8; }
+    #hud { margin: 8px 0; }
+  </style>
+</head>
+<body>
+  <h2>🪙 Coin Rush — test client</h2>
+  <div class="row">
+    <input id="user" placeholder="username" value="player1" />
+    <input id="pass" placeholder="password" type="password" value="secret123" />
+    <button id="register">Register</button>
+    <button id="login">Login</button>
+    <button id="queue" disabled>Find match</button>
+  </div>
+  <div id="hud">Not connected. Open this page in two tabs with two users, then press "Find match". Move with WASD / arrow keys.</div>
+  <canvas id="c" width="800" height="600"></canvas>
+  <div id="log"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const log = (m) => { $('log').textContent = `${new Date().toLocaleTimeString()}  ${m}\n` + $('log').textContent; };
+let ws, myId, state, seq = 0;
+const keys = new Set();
+
+async function auth(path) {
+  const res = await fetch(`/api/auth/${path}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: $('user').value, password: $('pass').value }),
+  });
+  const data = await res.json();
+  if (!res.ok) return log(`auth error: ${data.error?.message}`);
+  log(`logged in as ${data.player.username} (rating ${data.player.rating})`);
+  connect(data.token);
+}
+
+function connect(token) {
+  ws = new WebSocket(`${location.origin.replace(/^http/, 'ws')}/ws?token=${token}`);
+  ws.onopen = () => { $('queue').disabled = false; $('hud').textContent = 'Connected. Press "Find match".'; };
+  ws.onclose = (e) => { $('queue').disabled = true; log(`socket closed ${e.code} ${e.reason}`); };
+  ws.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'state') { state = msg; draw(); return; }
+    log(`${msg.type} ${JSON.stringify(msg).slice(0, 160)}`);
+    if (msg.type === 'welcome') myId = msg.playerId;
+    if (msg.type === 'queue_joined') $('hud').textContent = 'Searching for opponent…';
+    if (msg.type === 'match_found') $('hud').textContent = 'Match started! Collect coins.';
+    if (msg.type === 'match_end') {
+      const me = msg.results.find((r) => r.playerId === myId);
+      $('hud').textContent = `${msg.winnerId === myId ? '🏆 You win!' : msg.winnerId ? 'You lose' : 'Draw'} — score ${me.score}, rating ${me.ratingBefore} → ${me.ratingAfter}`;
+      state = null; // stop sending input; the last frame stays on the canvas
+      last = '';
+    }
+  };
+}
+
+$('register').onclick = () => auth('register');
+$('login').onclick = () => auth('login');
+$('queue').onclick = () => ws?.send(JSON.stringify({ type: 'queue_join' }));
+
+addEventListener('keydown', (e) => keys.add(e.key.toLowerCase()));
+addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
+
+// Send input 20 times per second (only the direction — the server owns positions)
+let last = '';
+setInterval(() => {
+  if (!ws || ws.readyState !== 1 || !state) return;
+  const dx = (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0);
+  const dy = (keys.has('s') || keys.has('arrowdown') ? 1 : 0) - (keys.has('w') || keys.has('arrowup') ? 1 : 0);
+  const key = `${dx},${dy}`;
+  if (key === last) return; // only send when input changes
+  last = key;
+  ws.send(JSON.stringify({ type: 'input', seq: ++seq, dx, dy }));
+}, 50);
+
+function draw() {
+  const ctx = $('c').getContext('2d');
+  ctx.clearRect(0, 0, 800, 600);
+  for (const c of state.coins) {
+    ctx.fillStyle = '#facc15';
+    ctx.beginPath(); ctx.arc(c.x, c.y, 8, 0, Math.PI * 2); ctx.fill();
+  }
+  for (const p of state.players) {
+    ctx.globalAlpha = p.connected ? 1 : 0.35;
+    ctx.fillStyle = p.id === myId ? '#38bdf8' : '#f472b6';
+    ctx.beginPath(); ctx.arc(p.x, p.y, 16, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#e2e8f0'; ctx.font = '12px system-ui'; ctx.textAlign = 'center';
+    ctx.fillText(`${p.username} (${p.score})`, p.x, p.y - 22);
+  }
+  ctx.globalAlpha = 1;
+  ctx.textAlign = 'left';
+  ctx.fillText(`⏱ ${(state.timeLeftMs / 1000).toFixed(1)}s   tick ${state.tick}`, 10, 20);
+}
+</script>
+</body>
+</html>
