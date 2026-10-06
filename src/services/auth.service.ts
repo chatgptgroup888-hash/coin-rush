@@ -25,13 +25,24 @@ export interface AuthResult {
 
 /* ---------------- Access token (JWT) ---------------- */
 
+// ล็อกอัลกอริทึมไว้ตัวเดียว กันคนส่ง token ที่ header บอก alg อื่นมาหลอก
+const JWT_ALGORITHM = 'HS256' as const;
+
 export function signToken(payload: TokenPayload): string {
-  return jwt.sign(payload, env.JWT_SECRET, { expiresIn: env.JWT_EXPIRES_IN } as jwt.SignOptions);
+  return jwt.sign(payload, env.JWT_SECRET, {
+    algorithm: JWT_ALGORITHM,
+    expiresIn: env.JWT_EXPIRES_IN,
+  } as jwt.SignOptions);
 }
 
 export function verifyToken(token: string): TokenPayload {
   try {
-    const decoded = jwt.verify(token, env.JWT_SECRET) as jwt.JwtPayload;
+    const decoded = jwt.verify(token, env.JWT_SECRET, {
+      algorithms: [JWT_ALGORITHM],
+    }) as jwt.JwtPayload;
+    if (typeof decoded.sub !== 'string' || typeof decoded.username !== 'string') {
+      throw new Error('Malformed token payload');
+    }
     return { sub: String(decoded.sub), username: String(decoded.username) };
   } catch {
     throw unauthorized('Invalid or expired token');
@@ -92,6 +103,9 @@ export async function revokeAllRefreshTokens(playerId: string): Promise<void> {
 
 /* ---------------- Register / Login ---------------- */
 
+// hash หลอกไว้เทียบตอนไม่พบ username ให้ใช้เวลาเท่ากับรหัสผิด (กันเดา username จากเวลาตอบ)
+const DUMMY_HASH = bcrypt.hashSync('dummy-password-for-timing', 10);
+
 export async function register(username: string, password: string): Promise<AuthResult> {
   const hash = await bcrypt.hash(password, 10);
   try {
@@ -117,8 +131,10 @@ export async function login(username: string, password: string): Promise<AuthRes
     [username],
   );
   const row = rows[0];
-  // Same error for "no user" and "wrong password" so usernames cannot be enumerated
-  if (!row || !(await bcrypt.compare(password, row.password_hash))) {
+  // เทียบ bcrypt ทุกครั้ง แม้ไม่มี user นี้ → เวลาตอบเท่ากัน
+  const passwordOk = await bcrypt.compare(password, row?.password_hash ?? DUMMY_HASH);
+  // ข้อความ error เดียวกันทั้ง "ไม่มี user" และ "รหัสผิด" กันเดาว่ามี username ไหนอยู่ในระบบ
+  if (!row || !passwordOk) {
     throw unauthorized('Invalid username or password');
   }
   return buildAuthResult({ id: row.id, username: row.username, rating: row.rating });
