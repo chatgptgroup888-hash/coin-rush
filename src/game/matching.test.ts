@@ -52,3 +52,10 @@ describe('allowedSpread', () => {
     expect(allowedSpread(10 * 60_000)).toBe(1000);
   });
 });
+
+describe('findGroups input validation', () => {
+  it('throws when size is less than 2', () => {
+    expect(() => findGroups([], 1)).toThrow('size must be an integer of at least 2');
+    expect(() => findGroups([], 0)).toThrow();
+  });
+});
