@@ -4,6 +4,10 @@ Backend สำหรับเกม Multiplayer แบบ Real-time: ผู้�
 
 **Stack:** TypeScript · Node.js · Express (REST) · WebSocket (`ws`) · PostgreSQL · Redis · Docker · GitHub Actions · (พร้อม deploy AWS)
 
+| ระหว่างเล่น (server-authoritative, 20 ticks/s) | จบเกม: Elo rating อัปเดตใน transaction |
+|---|---|
+| ![gameplay](docs/gameplay.png) | ![match end](docs/match-end.png) |
+
 ---
 
 ## ✨ Features
